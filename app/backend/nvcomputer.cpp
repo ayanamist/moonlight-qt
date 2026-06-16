@@ -5,7 +5,6 @@
 #include <QUdpSocket>
 #include <QHostInfo>
 #include <QNetworkInterface>
-#include <QNetworkProxy>
 
 #define SER_NAME "hostname"
 #define SER_UUID "uuid"
@@ -372,7 +371,6 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     }
 
     QTcpSocket s;
-    s.setProxy(QNetworkProxy::NoProxy);
     s.connectToHost(copyOfActiveAddress.address(), copyOfActiveAddress.port());
     if (s.waitForConnected(3000)) {
         Q_ASSERT(!s.localAddress().isNull());
