@@ -1,0 +1,134 @@
+---
+name: Build Windows and Publish Release
+permissions:
+  contents: write
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: build-win-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      ci_version: ${{ steps.meta.outputs.ci_version }}
+      commit_short: ${{ steps.meta.outputs.commit_short }}
+      commit_subject: ${{ steps.meta.outputs.commit_subject }}
+      commit_subject_slug: ${{ steps.meta.outputs.commit_subject_slug }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Collect commit metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMIT_SHORT=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          CI_VERSION=$(echo "${GITHUB_SHA}" | cut -c1-6)
+          COMMIT_SUBJECT=$(git log -1 --pretty=%s "${GITHUB_SHA}")
+          # Slug: keep alnum, dash, underscore and dot; replace other chars with '-'; trim length
+          COMMIT_SUBJECT_SLUG=$(echo "${COMMIT_SUBJECT}" \
+            | tr -c 'A-Za-z0-9._-' '-' \
+            | sed -E 's/-+/-/g; s/^-//; s/-$//' \
+            | cut -c1-60)
+          TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')
+          TAG_NAME="ci-${TIMESTAMP}-${COMMIT_SHORT}"
+          RELEASE_NAME="Build ${COMMIT_SHORT} - ${COMMIT_SUBJECT}"
+          {
+            echo "ci_version=${CI_VERSION}"
+            echo "commit_short=${COMMIT_SHORT}"
+            echo "commit_subject_slug=${COMMIT_SUBJECT_SLUG}"
+            echo "tag_name=${TAG_NAME}"
+          } >> "${GITHUB_OUTPUT}"
+          # Multiline-safe values
+          {
+            echo "commit_subject<<EOF"
+            echo "${COMMIT_SUBJECT}"
+            echo "EOF"
+            echo "release_name<<EOF"
+            echo "${RELEASE_NAME}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: setup
+    runs-on: windows-2025
+    env:
+      CI_VERSION: ${{ needs.setup.outputs.ci_version }}
+      QT_VERSION: 6.11.1
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
+          fetch-depth: 1
+
+      - name: Download dependencies
+        run: powershell ./setup-deps.ps1
+
+      - name: Install Qt (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          cache: true
+          set-env: false
+          add-tools-to-path: false
+          version: ${{ env.QT_VERSION }}
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@073e34d7c2ab4ae6961ed7cca690b3abd5ba5a7e'
+
+      - name: Build x64 binaries
+        shell: cmd
+        run: |
+          set "PATH=%QT_PATH%;%PATH%"
+          scripts\build-arch.bat Release x64
+        env:
+          QT_PATH: ${{ runner.workspace }}\Qt\${{ env.QT_VERSION }}\msvc2022_64\bin
+
+      - name: Build Package
+        shell: cmd
+        run: scripts\generate-bundle.bat Release
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          $stage = "release-assets"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $commit = "${{ needs.setup.outputs.commit_short }}"
+
+          $x64 = Get-ChildItem -Path "build/deploy-x64-release" -ErrorAction SilentlyContinue
+          if ($x64) {
+            $zipX64 = Join-Path $stage "Moonlight-Windows-x64-$commit.zip"
+            Compress-Archive -Path "build/deploy-x64-release/*" -DestinationPath $zipX64 -Force
+          }
+
+          # Include any x64 installer outputs (msi/exe) directly
+          Get-ChildItem -Path "build/installer-*" -Recurse -Include *.msi,*.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch 'arm64' } |
+            ForEach-Object { Copy-Item $_.FullName -Destination $stage }
+
+          Get-ChildItem $stage
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.setup.outputs.tag_name }}
+          name: ${{ needs.setup.outputs.release_name }}
+          body: |
+            Automated Windows build.
+
+            - Commit: `${{ github.sha }}`
+            - Subject: ${{ needs.setup.outputs.commit_subject }}
+            - Branch/Ref: `${{ github.ref }}`
+            - Triggered by: `${{ github.event_name }}`
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: release-assets/*
