@@ -6,7 +6,6 @@
 #include <QQuickStyle>
 #include <QMutex>
 #include <QtDebug>
-#include <QNetworkProxyFactory>
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
@@ -645,13 +644,6 @@ int main(int argc, char *argv[])
     qputenv("MTL_DEBUG_LAYER", "1");
     qputenv("MTL_SHADER_VALIDATION", "1");
 #endif
-
-    // We don't want system proxies to apply to us
-    QNetworkProxyFactory::setUseSystemConfiguration(false);
-
-    // Clear any default application proxy
-    QNetworkProxy noProxy(QNetworkProxy::NoProxy);
-    QNetworkProxy::setApplicationProxy(noProxy);
 
     // Register custom metatypes for use in signals
     qRegisterMetaType<NvApp>("NvApp");

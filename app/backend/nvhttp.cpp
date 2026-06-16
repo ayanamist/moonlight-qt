@@ -10,7 +10,6 @@
 #include <QSslKey>
 #include <QImageReader>
 #include <QtEndian>
-#include <QNetworkProxy>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -33,10 +32,6 @@ NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert
 
     setAddress(address);
     setHttpsPort(httpsPort);
-
-    // Never use a proxy server
-    QNetworkProxy noProxy(QNetworkProxy::NoProxy);
-    m_Nam->setProxy(noProxy);
 }
 
 NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
