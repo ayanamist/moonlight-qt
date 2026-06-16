@@ -92,10 +92,6 @@ jobs:
         env:
           QT_PATH: ${{ runner.workspace }}\Qt\${{ env.QT_VERSION }}\msvc2022_64\bin
 
-      - name: Build Package
-        shell: cmd
-        run: scripts\generate-bundle.bat Release
-
       - name: Stage release assets
         shell: pwsh
         run: |
@@ -103,16 +99,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           $commit = "${{ needs.setup.outputs.commit_short }}"
 
-          $x64 = Get-ChildItem -Path "build/deploy-x64-release" -ErrorAction SilentlyContinue
-          if ($x64) {
-            $zipX64 = Join-Path $stage "Moonlight-Windows-x64-$commit.zip"
-            Compress-Archive -Path "build/deploy-x64-release/*" -DestinationPath $zipX64 -Force
-          }
-
-          # Include any x64 installer outputs (msi/exe) directly
-          Get-ChildItem -Path "build/installer-*" -Recurse -Include *.msi,*.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch 'arm64' } |
+          # Portable zip produced by build-arch.bat
+          Get-ChildItem -Path "build/installer-x64-release" -Recurse -Include *.zip -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName -Destination $stage }
+
+          # Per-arch MSI produced by build-arch.bat
+          $msi = Join-Path "build/build-x64-release" "Moonlight.msi"
+          if (Test-Path $msi) {
+            Copy-Item $msi -Destination (Join-Path $stage "Moonlight-x64-$commit.msi")
+          }
 
           Get-ChildItem $stage
 
